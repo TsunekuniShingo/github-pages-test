@@ -46,7 +46,7 @@
 
   // --- HDR環境マップ（物理ベースの照明） ---
   new RGBELoader()
-    .load('https://dl.polyhaven.org/file/ph-assets/HDRIs/hdr/1k/studio_small_09_1k.hdr', (hdr) => {
+    .load('resources/meadow.hdr', (hdr) => {
       hdr.mapping = THREE.EquirectangularReflectionMapping;
       scene.environment = hdr;       // PBRマテリアルの反射に使用
       scene.background = hdr;        // 背景にも適用（不要なら削除）
@@ -85,7 +85,7 @@
   const controls = new OrbitControls(camera, renderer.domElement);
   controls.enableDamping = true;
   controls.dampingFactor = 0.05;
-  controls.minDistance = 0.05;
+  controls.minDistance = 0.2;
   controls.maxDistance = 2;
   controls.autoRotate = true;       // 自動回転
   controls.autoRotateSpeed = 1.5;
