@@ -35,25 +35,24 @@
   const renderer = new THREE.WebGLRenderer({ antialias: true });
   renderer.setSize(window.innerWidth, window.innerHeight);
   renderer.setPixelRatio(window.devicePixelRatio);
-  renderer.toneMapping = THREE.ACESFilmicToneMapping; // 映画的な色調補正
+  renderer.toneMapping = THREE.ACESFilmicToneMapping;
   renderer.toneMappingExposure = 1.2;
-  renderer.shadowMap.enabled = true;                 // 影を有効化
-  renderer.shadowMap.type = THREE.PCFSoftShadowMap;  // 柔らかい影
+  renderer.shadowMap.enabled = true;
+  renderer.shadowMap.type = THREE.PCFSoftShadowMap;
   document.body.appendChild(renderer.domElement);
 
   const scene = new THREE.Scene();
   const camera = new THREE.PerspectiveCamera(45, window.innerWidth / window.innerHeight, 0.01, 1000);
 
-  // --- HDR環境マップ（物理ベースの照明） ---
+  // --- HDR環境マップ（ローカル） ---
   new RGBELoader()
     .load('resources/meadow.hdr', (hdr) => {
       hdr.mapping = THREE.EquirectangularReflectionMapping;
-      scene.environment = hdr;       // PBRマテリアルの反射に使用
-      scene.background = hdr;        // 背景にも適用（不要なら削除）
+      scene.environment = hdr;
+      scene.background = hdr;
     });
 
-  // --- 追加ライト ---
-  // キーライト（主光源）
+  // --- ライト ---
   const keyLight = new THREE.DirectionalLight(0xfff4e0, 3);
   keyLight.position.set(3, 5, 3);
   keyLight.castShadow = true;
@@ -62,38 +61,19 @@
   keyLight.shadow.camera.far = 50;
   scene.add(keyLight);
 
-  // フィルライト（影を和らげる補助光）
   const fillLight = new THREE.DirectionalLight(0xc9d8ff, 1);
   fillLight.position.set(-3, 2, -2);
   scene.add(fillLight);
 
-  // リムライト（輪郭を際立たせる逆光）
   const rimLight = new THREE.DirectionalLight(0xffffff, 1.5);
   rimLight.position.set(0, 3, -5);
   scene.add(rimLight);
 
-  // --- 床（影を受ける） ---
-  const floor = new THREE.Mesh(
-    new THREE.PlaneGeometry(20, 20),
-    new THREE.ShadowMaterial({ opacity: 0.3 })
-  );
-  floor.rotation.x = -Math.PI / 2;
-  floor.receiveShadow = true;
-  scene.add(floor);
-
-  // --- OrbitControls ---
-  const controls = new OrbitControls(camera, renderer.domElement);
-  controls.enableDamping = true;
-  controls.dampingFactor = 0.05;
-  controls.minDistance = 0.2;
-  controls.maxDistance = 2;
-  controls.autoRotate = true;       // 自動回転
-  controls.autoRotateSpeed = 1.5;
-
-  // --- GLBロード ---
+  // --- DRACOLoader（共通） ---
   const dracoLoader = new DRACOLoader();
   dracoLoader.setDecoderPath('https://www.gstatic.com/draco/versioned/decoders/1.5.6/');
 
+  // --- メインモデルのロード ---
   const loader = new GLTFLoader();
   loader.setDRACOLoader(dracoLoader);
 
@@ -102,7 +82,6 @@
     (gltf) => {
       const model = gltf.scene;
 
-      // 影を有効化
       model.traverse((node) => {
         if (node.isMesh) {
           node.castShadow = true;
@@ -110,17 +89,19 @@
         }
       });
 
-      // 中央・カメラ自動調整
+      // 接地処理
       const box = new THREE.Box3().setFromObject(model);
       const center = box.getCenter(new THREE.Vector3());
       const size = box.getSize(new THREE.Vector3());
       const maxDim = Math.max(size.x, size.y, size.z);
 
-      model.position.sub(center);
-      model.position.y += size.y / 2; // 床の上に配置
+      model.position.x = -center.x;
+      model.position.z = -center.z;
+      model.position.y = -box.min.y; // 底面をy=0に接地
 
       camera.position.set(0, maxDim * 0.6, maxDim * 2);
-      controls.target.set(0, 0, 0);
+      controls.target.set(0, maxDim * 0.3, 0);
+      controls.update();
 
       scene.add(model);
       document.getElementById('loading').remove();
@@ -132,12 +113,56 @@
     (error) => console.error('Load error:', error)
   );
 
+  // --- 草モデルを床に敷き詰める ---
+  const grassLoader = new GLTFLoader();
+  grassLoader.setDRACOLoader(dracoLoader);
+
+  grassLoader.load('resources/model/grass_medium_01_1k.gltf', (gltf) => {
+    const grassTemplate = gltf.scene;
+
+    const gridSize = 6;
+    const spacing = 0.8;
+    const spread = 0.3;
+
+    for (let i = -gridSize; i <= gridSize; i++) {
+      for (let j = -gridSize; j <= gridSize; j++) {
+        const grass = grassTemplate.clone(true);
+
+        grass.position.set(
+          i * spacing + (Math.random() - 0.5) * spread,
+          0,
+          j * spacing + (Math.random() - 0.5) * spread
+        );
+        grass.rotation.y = Math.random() * Math.PI * 2;
+        const s = 0.8 + Math.random() * 0.4;
+        grass.scale.set(s, s, s);
+
+        grass.traverse((node) => {
+          if (node.isMesh) node.receiveShadow = true;
+        });
+
+        scene.add(grass);
+      }
+    }
+  });
+
+  // --- OrbitControls ---
+  const controls = new OrbitControls(camera, renderer.domElement);
+  controls.enableDamping = true;
+  controls.dampingFactor = 0.05;
+  controls.minDistance = 0.2;
+  controls.maxDistance = 1;
+  controls.autoRotate = true;
+  controls.autoRotateSpeed = 1.5;
+
+  // --- リサイズ対応 ---
   window.addEventListener('resize', () => {
     camera.aspect = window.innerWidth / window.innerHeight;
     camera.updateProjectionMatrix();
     renderer.setSize(window.innerWidth, window.innerHeight);
   });
 
+  // --- アニメーションループ ---
   function animate() {
     requestAnimationFrame(animate);
     controls.update();
